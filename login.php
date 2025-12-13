@@ -24,6 +24,11 @@ if ($auth->isLoggedIn()) {
 $error = '';
 $success = '';
 
+// Check if user was logged out
+if (isset($_GET['logged_out']) && $_GET['logged_out'] == '1') {
+    $success = 'You have been successfully logged out.';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';

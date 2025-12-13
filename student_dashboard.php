@@ -17,37 +17,24 @@ $student = $studentManager->getStudentById($studentId);
 $classes = $classManager->getStudentClasses($studentId);
 $attendanceSummary = $studentManager->getStudentAttendanceSummary($studentId);
 $excuses = $excuseManager->getExcuses(['student_id' => $studentId]);
+
+// Set page title
+$pageTitle = 'Student Dashboard';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Dashboard - <?php echo SITE_NAME; ?></title>
-    <link rel="stylesheet" href="css/dashboard.css">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title><?php echo $pageTitle . ' - ' . SITE_NAME; ?></title>
 </head>
 <body>
-    <?php include 'includes/student_header.php'; ?>
+    <?php include 'includes/student_sidebar.php'; ?>
     
     <div class="dashboard-container">
-        <aside class="sidebar">
-            <div class="user-info">
-                <div class="avatar"><?php echo strtoupper(substr($student['first_name'], 0, 1)); ?></div>
-                <h3><?php echo htmlspecialchars($student['full_name']); ?></h3>
-                <p><?php echo htmlspecialchars($student['student_number']); ?></p>
-                <p><?php echo htmlspecialchars($student['program'] . ' ' . $student['year_level']); ?></p>
-            </div>
-            
-            <nav class="nav-menu">
-                <a href="student_dashboard.php" class="active">📊 Dashboard</a>
-                <a href="student_classes.php">📚 My Classes</a>
-                <a href="student_attendance.php">✓ My Attendance</a>
-                <a href="student_register_rfid.php">🎴 Register RFID Card</a>
-                <a href="student_excuse.php">📝 Submit Excuse</a>
-                <a href="logout.php">🚪 Logout</a>
-            </nav>
-        </aside>
-        
         <main class="main-content">
             <div class="page-header">
                 <h1>Dashboard</h1>
@@ -181,65 +168,11 @@ $excuses = $excuseManager->getExcuses(['student_id' => $studentId]);
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f5f6fa;
+            margin: 0;
         }
         
         .dashboard-container {
             display: flex;
-            min-height: 100vh;
-        }
-        
-        .sidebar {
-            width: 280px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px 20px;
-            position: fixed;
-            height: 100vh;
-            overflow-y: auto;
-        }
-        
-        .user-info {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-        }
-        
-        .avatar {
-            width: 80px;
-            height: 80px;
-            background: rgba(255,255,255,0.3);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 32px;
-            font-weight: bold;
-            margin: 0 auto 15px;
-        }
-        
-        .user-info h3 {
-            font-size: 18px;
-            margin-bottom: 5px;
-        }
-        
-        .user-info p {
-            font-size: 13px;
-            opacity: 0.9;
-        }
-        
-        .nav-menu a {
-            display: block;
-            padding: 12px 15px;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            margin-bottom: 5px;
-            transition: background 0.3s;
-        }
-        
-        .nav-menu a:hover, .nav-menu a.active {
-            background: rgba(255,255,255,0.2);
         }
         
         .main-content {

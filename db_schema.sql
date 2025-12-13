@@ -1,8 +1,3 @@
--- ============================================
--- CITCS ATTENDANCE MONITORING SYSTEM (RFID VERSION)
--- Database Schema with Sample Data
--- ============================================
-
 DROP DATABASE IF EXISTS citcs_attendance;
 CREATE DATABASE citcs_attendance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE citcs_attendance;
@@ -325,20 +320,3 @@ INSERT INTO excuse_letters (student_id, excuse_type, description, status) VALUES
 -- Insert Excuse Dates (linking to attendance record)
 INSERT INTO excuse_dates (excuse_id, attendance_id) VALUES
 (1, 3);
-
--- ============================================
--- USEFUL QUERIES FOR TESTING
--- ============================================
-
--- View students with RFID status
--- SELECT s.student_number, u.first_name, u.last_name, s.rfid_uid, s.rfid_status, s.rfid_registered_at
--- FROM students s JOIN users u ON s.user_id = u.user_id;
-
--- View students without RFID cards
--- SELECT s.student_number, u.first_name, u.last_name
--- FROM students s JOIN users u ON s.user_id = u.user_id
--- WHERE s.rfid_uid IS NULL;
-
--- ============================================
--- END OF SCHEMA
--- ============================================
