@@ -238,9 +238,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         <div class="demo-credentials">
             <h4>Demo Credentials:</h4>
-            <p><strong>Secretary:</strong> secretary1 / password123</p>
-            <p><strong>Professor:</strong> prof_cruz / password123</p>
-            <p><strong>Student:</strong> 2021-001 / password123</p>
+            <p><strong>Secretary:</strong> secretary1 / password</p>
+            <p><strong>Professor:</strong> prof_cruz / password</p>
+            <p><strong>Student:</strong> 2021-001 / password</p>
             <p style="margin-top: 10px; font-size: 12px; color: #666;">
                 Note: After login, students should register their RFID cards
             </p>
