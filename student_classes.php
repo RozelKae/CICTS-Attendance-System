@@ -136,7 +136,7 @@ $pageTitle = 'My Classes';
                             
                             <div class="class-footer">
                                 <a href="student_attendance.php?class_id=<?php echo $class['class_id']; ?>" class="btn btn-sm btn-primary">
-                                    View Attendance Records →
+                                    View My Attendance →
                                 </a>
                             </div>
                         </div>

@@ -25,6 +25,9 @@ $currentPage = basename($_SERVER['PHP_SELF']);
         <a href="secretary_classes.php" class="<?php echo $currentPage == 'secretary_classes.php' ? 'active' : ''; ?>">
             📚 Class Management
         </a>
+        <a href="secretary_attendance.php" class="<?php echo $currentPage == 'secretary_attendance.php' ? 'active' : ''; ?>">
+            ✓ Attendance Records
+        </a>
         <a href="secretary_rfid.php" class="<?php echo $currentPage == 'secretary_rfid.php' ? 'active' : ''; ?>">
             🎴 RFID Management
         </a>

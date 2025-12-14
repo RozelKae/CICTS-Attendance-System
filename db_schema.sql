@@ -215,7 +215,7 @@ CREATE TABLE excuse_attachments (
 CREATE TABLE audit_logs (
     log_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    action_type ENUM('create', 'update', 'delete') NOT NULL,
+    action_type VARCHAR(50) NOT NULL,
     table_affected VARCHAR(50) NOT NULL,
     record_id INT NOT NULL,
     old_values JSON NULL,

@@ -1,4 +1,9 @@
 <?php
+/**
+ * Database Class
+ * PDO wrapper with transaction support
+ */
+
 class Database {
     private $host = '127.0.0.1';
     private $db   = 'citcs_attendance';
@@ -33,6 +38,19 @@ class Database {
 
     public function lastInsertId() {
         return $this->pdo->lastInsertId();
+    }
+    
+    // TRANSACTION METHODS (MISSING - NOW ADDED)
+    public function beginTransaction() {
+        return $this->pdo->beginTransaction();
+    }
+    
+    public function commit() {
+        return $this->pdo->commit();
+    }
+    
+    public function rollback() {
+        return $this->pdo->rollBack();
     }
 }
 ?>

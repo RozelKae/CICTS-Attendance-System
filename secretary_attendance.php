@@ -18,10 +18,36 @@ $classes = $classManager->getClasses(['status' => 'active']);
 $filterClassId = $_GET['class_id'] ?? '';
 $filterDate = $_GET['date'] ?? '';
 
-// Get sessions based on filters
+// Get recent sessions by default (last 30 days, all classes)
 $sessions = [];
-if ($filterClassId) {
-    $sql = "SELECT asess.*, 
+if ($filterClassId || !isset($_GET['class_id'])) {
+    // If no filter, show recent sessions from all classes
+    if (empty($filterClassId)) {
+        $sql = "SELECT asess.*, 
+                c.section, co.course_code, co.course_name,
+                CONCAT(u.first_name, ' ', u.last_name) as professor_name,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = asess.session_id) as recorded_count,
+                (SELECT COUNT(*) FROM class_enrollments WHERE class_id = asess.class_id AND status = 'enrolled') as total_students
+                FROM attendance_sessions asess
+                JOIN classes c ON asess.class_id = c.class_id
+                JOIN courses co ON c.course_id = co.course_id
+                JOIN professors p ON c.professor_id = p.professor_id
+                JOIN users u ON p.user_id = u.user_id
+                WHERE asess.session_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+        
+        $params = [];
+        
+        if ($filterDate) {
+            $sql .= " AND asess.session_date = ?";
+            $params[] = $filterDate;
+        }
+        
+        $sql .= " ORDER BY asess.session_date DESC, asess.start_time DESC LIMIT 100";
+        $sessions = $db->all($sql, $params);
+    } else {
+        // Filter by specific class
+        // Filter by specific class
+        $sql = "SELECT asess.*, 
             c.section, co.course_code, co.course_name,
             CONCAT(u.first_name, ' ', u.last_name) as professor_name,
             (SELECT COUNT(*) FROM attendance_records WHERE session_id = asess.session_id) as recorded_count,
@@ -32,16 +58,17 @@ if ($filterClassId) {
             JOIN professors p ON c.professor_id = p.professor_id
             JOIN users u ON p.user_id = u.user_id
             WHERE asess.class_id = ?";
-    
-    $params = [$filterClassId];
-    
-    if ($filterDate) {
-        $sql .= " AND asess.session_date = ?";
-        $params[] = $filterDate;
+        
+        $params = [$filterClassId];
+        
+        if ($filterDate) {
+            $sql .= " AND asess.session_date = ?";
+            $params[] = $filterDate;
+        }
+        
+        $sql .= " ORDER BY asess.session_date DESC, asess.start_time DESC LIMIT 50";
+        $sessions = $db->all($sql, $params);
     }
-    
-    $sql .= " ORDER BY asess.session_date DESC, asess.start_time DESC LIMIT 50";
-    $sessions = $db->all($sql, $params);
 }
 
 // Handle edit attendance
@@ -160,9 +187,9 @@ $pageTitle = 'Attendance Records';
                 <div class="filter-section">
                     <form method="GET" action="" class="filter-form">
                         <div class="filter-group">
-                            <label for="class_id">Select Class:</label>
-                            <select name="class_id" id="class_id" class="filter-select" required>
-                                <option value="">Choose a class...</option>
+                            <label for="class_id">Select Class (Optional):</label>
+                            <select name="class_id" id="class_id" class="filter-select">
+                                <option value="">All Classes</option>
                                 <?php foreach ($classes as $class): ?>
                                     <option value="<?php echo $class['class_id']; ?>" <?php echo $filterClassId == $class['class_id'] ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars($class['course_code'] . ' - ' . $class['section'] . ' (' . $class['professor_name'] . ')'); ?>
@@ -183,78 +210,74 @@ $pageTitle = 'Attendance Records';
                     </form>
                 </div>
                 
-                <?php if ($filterClassId): ?>
-                    <div class="section-card">
-                        <h2>Attendance Sessions</h2>
-                        
-                        <?php if (empty($sessions)): ?>
-                            <div style="text-align: center; padding: 40px; color: #7f8c8d;">
-                                <p>No attendance sessions found for the selected filters.</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="table-responsive">
-                                <table class="data-table">
-                                    <thead>
+                <div class="filter-section">
+
+                    <?php if (empty($sessions)): ?>
+                        <div style="text-align: center; padding: 40px; color: #7f8c8d;">
+                            <p>No attendance sessions found for the selected filters.</p>
+                        </div>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Time</th>
+                                        <th>Class</th>
+                                        <th>Professor</th>
+                                        <th>Status</th>
+                                        <th>Recorded</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($sessions as $session): ?>
                                         <tr>
-                                            <th>Date</th>
-                                            <th>Time</th>
-                                            <th>Class</th>
-                                            <th>Professor</th>
-                                            <th>Status</th>
-                                            <th>Recorded</th>
-                                            <th>Actions</th>
+                                            <td>
+                                                <strong><?php echo date('M d, Y', strtotime($session['session_date'])); ?></strong><br>
+                                                <small class="text-muted"><?php echo date('l', strtotime($session['session_date'])); ?></small>
+                                            </td>
+                                            <td>
+                                                <?php echo date('g:i A', strtotime($session['start_time'])); ?> -
+                                                <?php echo date('g:i A', strtotime($session['end_time'])); ?>
+                                            </td>
+                                            <td>
+                                                <strong><?php echo htmlspecialchars($session['course_code']); ?></strong><br>
+                                                <small class="text-muted"><?php echo htmlspecialchars($session['section']); ?></small>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($session['professor_name']); ?></td>
+                                            <td>
+                                                <?php
+                                                $statusClass = [
+                                                    'scheduled' => 'badge-info',
+                                                    'open' => 'badge-success',
+                                                    'closed' => 'badge-secondary',
+                                                    'cancelled' => 'badge-danger'
+                                                ][$session['status']] ?? 'badge-secondary';
+                                                ?>
+                                                <span class="badge <?php echo $statusClass; ?>">
+                                                    <?php echo ucfirst($session['status']); ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <strong><?php echo $session['recorded_count']; ?></strong>
+                                                / <?php echo $session['total_students']; ?>
+                                            </td>
+                                            <td>
+                                                <a href="secretary_attendance.php?session_id=<?php echo $session['session_id']; ?>"
+                                                class="btn btn-sm btn-primary">
+                                                    View Details
+                                                </a>
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($sessions as $session): ?>
-                                            <tr>
-                                                <td>
-                                                    <strong><?php echo date('M d, Y', strtotime($session['session_date'])); ?></strong><br>
-                                                    <small class="text-muted"><?php echo date('l', strtotime($session['session_date'])); ?></small>
-                                                </td>
-                                                <td>
-                                                    <?php echo date('g:i A', strtotime($session['start_time'])); ?> - 
-                                                    <?php echo date('g:i A', strtotime($session['end_time'])); ?>
-                                                </td>
-                                                <td>
-                                                    <strong><?php echo htmlspecialchars($session['course_code']); ?></strong><br>
-                                                    <small class="text-muted"><?php echo htmlspecialchars($session['section']); ?></small>
-                                                </td>
-                                                <td><?php echo htmlspecialchars($session['professor_name']); ?></td>
-                                                <td>
-                                                    <?php
-                                                    $statusClass = [
-                                                        'scheduled' => 'badge-info',
-                                                        'open' => 'badge-success',
-                                                        'closed' => 'badge-secondary',
-                                                        'cancelled' => 'badge-danger'
-                                                    ][$session['status']] ?? 'badge-secondary';
-                                                    ?>
-                                                    <span class="badge <?php echo $statusClass; ?>">
-                                                        <?php echo ucfirst($session['status']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <strong><?php echo $session['recorded_count']; ?></strong> / <?php echo $session['total_students']; ?>
-                                                    <?php if ($session['total_students'] > 0): ?>
-                                                        <small class="text-muted">
-                                                            (<?php echo round(($session['recorded_count'] / $session['total_students']) * 100); ?>%)
-                                                        </small>
-                                                    <?php endif; ?>
-                                                </td>
-                                                <td>
-                                                    <a href="secretary_attendance.php?session_id=<?php echo $session['session_id']; ?>" class="btn btn-sm btn-primary">
-                                                        View Details
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+
+                </div>
+
                 
             <?php else: ?>
                 <?php if ($sessionDetails): ?>
