@@ -2,111 +2,276 @@
 require_once 'config.php';
 require_once 'Auth.php';
 require_once 'ClassManager.php';
-require_once 'Attendance.php';
+require_once 'StudentManager.php';
 require_once 'Database.php';
 
+// Auth check - students only
 $auth = new Auth();
-$auth->requireRole(['secretary']);
+$auth->requireRole(['student']);
 
 $classManager = new ClassManager();
-$attendance = new Attendance();
+$studentManager = new StudentManager();
 $db = new Database();
 
-$classes = $classManager->getClasses(['status' => 'active']);
+$studentId = $auth->getRoleId();
+$classes = $classManager->getStudentClasses($studentId);
 
 // Get filters
-$filterClassId = $_GET['class_id'] ?? '';
-$filterDate = $_GET['date'] ?? '';
+$filterClassId = $_GET['class_id'] ?? 'all';
+$filterStartDate = $_GET['start_date'] ?? '';
+$filterEndDate = $_GET['end_date'] ?? '';
 
-// Get sessions based on filters
-$sessions = [];
-if ($filterClassId) {
-    $sql = "SELECT asess.*, 
-            c.section, co.course_code, co.course_name,
-            CONCAT(u.first_name, ' ', u.last_name) as professor_name,
-            (SELECT COUNT(*) FROM attendance_records WHERE session_id = asess.session_id) as recorded_count,
-            (SELECT COUNT(*) FROM class_enrollments WHERE class_id = asess.class_id AND status = 'enrolled') as total_students
-            FROM attendance_sessions asess
-            JOIN classes c ON asess.class_id = c.class_id
-            JOIN courses co ON c.course_id = co.course_id
-            JOIN professors p ON c.professor_id = p.professor_id
-            JOIN users u ON p.user_id = u.user_id
-            WHERE asess.class_id = ?";
-    
-    $params = [$filterClassId];
-    
-    if ($filterDate) {
-        $sql .= " AND asess.session_date = ?";
-        $params[] = $filterDate;
+// Build query
+$sql = "SELECT ar.*, 
+        asess.session_date, asess.start_time, asess.end_time,
+        c.section, co.course_code, co.course_name,
+        DATE_FORMAT(asess.session_date, '%W, %M %d, %Y') as formatted_date,
+        DATE_FORMAT(asess.start_time, '%h:%i %p') as formatted_start,
+        DATE_FORMAT(asess.end_time, '%h:%i %p') as formatted_end,
+        TIME_FORMAT(ar.time_in, '%h:%i %p') as formatted_time_in
+        FROM attendance_records ar
+        JOIN attendance_sessions asess ON ar.session_id = asess.session_id
+        JOIN classes c ON asess.class_id = c.class_id
+        JOIN courses co ON c.course_id = co.course_id
+        WHERE ar.student_id = ? AND asess.status = 'closed'";
+
+$params = [$studentId];
+
+if ($filterClassId !== 'all') {
+    $sql .= " AND c.class_id = ?";
+    $params[] = $filterClassId;
+}
+
+if ($filterStartDate) {
+    $sql .= " AND asess.session_date >= ?";
+    $params[] = $filterStartDate;
+}
+
+if ($filterEndDate) {
+    $sql .= " AND asess.session_date <= ?";
+    $params[] = $filterEndDate;
+}
+
+$sql .= " ORDER BY asess.session_date DESC, asess.start_time DESC";
+
+$attendanceRecords = $db->all($sql, $params);
+
+// Calculate summary
+$summary = [
+    'total' => count($attendanceRecords),
+    'present' => 0,
+    'late' => 0,
+    'absent' => 0,
+    'excused' => 0
+];
+
+foreach ($attendanceRecords as $record) {
+    if (isset($summary[$record['status']])) {
+        $summary[$record['status']]++;
     }
-    
-    $sql .= " ORDER BY asess.session_date DESC, asess.start_time DESC LIMIT 50";
-    $sessions = $db->all($sql, $params);
 }
 
-// Handle edit attendance
-$message = '';
-$messageType = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_attendance'])) {
-    $attendanceId = $_POST['attendance_id'] ?? null;
-    $newStatus = $_POST['status'] ?? '';
-    $remarks = $_POST['remarks'] ?? '';
-    
-    $result = $attendance->editAttendance($attendanceId, $newStatus, $auth->getUserId(), $remarks);
-    $message = $result['message'];
-    $messageType = $result['success'] ? 'success' : 'error';
-}
-
-// Get selected session details
-$selectedSessionId = $_GET['session_id'] ?? null;
-$sessionDetails = null;
-$sessionAttendance = [];
-
-if ($selectedSessionId) {
-    $sessionDetails = $attendance->getSession($selectedSessionId);
-    if ($sessionDetails) {
-        $sessionAttendance = $attendance->getSessionAttendance($selectedSessionId);
-    }
-}
-
-$pageTitle = 'Attendance Records';
+$pageTitle = 'My Attendance';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title><?php echo $pageTitle . ' - ' . SITE_NAME; ?></title>
+</head>
+<body>
+    <?php include 'includes/student_sidebar.php'; ?>
+    
+    <div class="dashboard-container">
+        <main class="main-content">
+            <div class="page-header">
+                <h1>✓ My Attendance</h1>
+                <p>View your complete attendance history</p>
+            </div>
+            
+            <!-- Summary Cards -->
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="summary-icon">📊</div>
+                    <div class="summary-info">
+                        <h3><?php echo $summary['total']; ?></h3>
+                        <p>Total Sessions</p>
+                    </div>
+                </div>
+                <div class="summary-card card-present">
+                    <div class="summary-icon">✅</div>
+                    <div class="summary-info">
+                        <h3><?php echo $summary['present']; ?></h3>
+                        <p>Present</p>
+                    </div>
+                </div>
+                <div class="summary-card card-late">
+                    <div class="summary-icon">⚠️</div>
+                    <div class="summary-info">
+                        <h3><?php echo $summary['late']; ?></h3>
+                        <p>Late</p>
+                    </div>
+                </div>
+                <div class="summary-card card-absent">
+                    <div class="summary-icon">❌</div>
+                    <div class="summary-info">
+                        <h3><?php echo $summary['absent']; ?></h3>
+                        <p>Absent</p>
+                    </div>
+                </div>
+                <div class="summary-card card-excused">
+                    <div class="summary-icon">📝</div>
+                    <div class="summary-info">
+                        <h3><?php echo $summary['excused']; ?></h3>
+                        <p>Excused</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Filters -->
+            <div class="filter-section">
+                <form method="GET" action="" class="filter-form">
+                    <div class="filter-group">
+                        <label for="class_id">Filter by Class:</label>
+                        <select name="class_id" id="class_id" class="filter-select">
+                            <option value="all" <?php echo $filterClassId === 'all' ? 'selected' : ''; ?>>All Classes</option>
+                            <?php foreach ($classes as $class): ?>
+                                <option value="<?php echo $class['class_id']; ?>" <?php echo $filterClassId == $class['class_id'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($class['course_code'] . ' - ' . $class['section']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="start_date">Start Date:</label>
+                        <input type="date" name="start_date" id="start_date" class="filter-input" value="<?php echo htmlspecialchars($filterStartDate); ?>">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="end_date">End Date:</label>
+                        <input type="date" name="end_date" id="end_date" class="filter-input" value="<?php echo htmlspecialchars($filterEndDate); ?>">
+                    </div>
+                    
+                    <div class="filter-actions">
+                        <button type="submit" class="btn btn-primary">Apply Filters</button>
+                        <a href="student_attendance.php" class="btn btn-secondary">Clear</a>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Attendance Table -->
+            <div class="section-card">
+                <h2>Attendance Records</h2>
+                
+                <?php if (empty($attendanceRecords)): ?>
+                    <div class="empty-state">
+                        <p>No attendance records found with the current filters.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Class</th>
+                                    <th>Session Time</th>
+                                    <th>Time In</th>
+                                    <th>Status</th>
+                                    <th>Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($attendanceRecords as $record): ?>
+                                    <tr>
+                                        <td>
+                                            <strong><?php echo date('M d, Y', strtotime($record['session_date'])); ?></strong><br>
+                                            <small class="text-muted"><?php echo date('l', strtotime($record['session_date'])); ?></small>
+                                        </td>
+                                        <td>
+                                            <strong><?php echo htmlspecialchars($record['course_code']); ?></strong><br>
+                                            <small class="text-muted"><?php echo htmlspecialchars($record['section']); ?></small>
+                                        </td>
+                                        <td>
+                                            <?php echo htmlspecialchars($record['formatted_start']); ?> - 
+                                            <?php echo htmlspecialchars($record['formatted_end']); ?>
+                                        </td>
+                                        <td>
+                                            <?php if ($record['time_in']): ?>
+                                                <strong><?php echo htmlspecialchars($record['formatted_time_in']); ?></strong>
+                                            <?php else: ?>
+                                                <span class="text-muted">—</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php
+                                            $statusClass = [
+                                                'present' => 'badge-success',
+                                                'late' => 'badge-warning',
+                                                'absent' => 'badge-danger',
+                                                'excused' => 'badge-info'
+                                            ][$record['status']] ?? 'badge-secondary';
+                                            ?>
+                                            <span class="badge <?php echo $statusClass; ?>">
+                                                <?php echo ucfirst($record['status']); ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <?php if ($record['remarks']): ?>
+                                                <span class="remarks"><?php echo htmlspecialchars($record['remarks']); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-muted">—</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="table-footer">
+                        <p>Showing <?php echo count($attendanceRecords); ?> record(s)</p>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </main>
+    </div>
+    
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f6fa; }
         .dashboard-container { display: flex; }
-        .page-header { margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
-        .page-header h1 { font-size: 32px; color: #2c3e50; }
+        .main-content { margin-left: 280px; padding: 30px; flex: 1; min-height: 100vh; }
+        .page-header { margin-bottom: 30px; }
+        .page-header h1 { font-size: 32px; color: #2c3e50; margin-bottom: 5px; }
+        .page-header p { color: #7f8c8d; }
         
-        .alert { padding: 15px 20px; border-radius: 10px; margin-bottom: 20px; }
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .summary-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 15px; border-left: 4px solid #667eea; }
+        .summary-card.card-present { border-left-color: #28a745; }
+        .summary-card.card-late { border-left-color: #ffc107; }
+        .summary-card.card-absent { border-left-color: #dc3545; }
+        .summary-card.card-excused { border-left-color: #17a2b8; }
+        .summary-icon { font-size: 32px; }
+        .summary-info h3 { font-size: 28px; color: #2c3e50; margin-bottom: 3px; }
+        .summary-info p { color: #7f8c8d; font-size: 13px; }
         
         .filter-section { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .filter-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 20px; align-items: end; }
+        .filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; align-items: end; }
         .filter-group { display: flex; flex-direction: column; }
         .filter-group label { font-weight: 600; color: #2c3e50; margin-bottom: 8px; font-size: 14px; }
-        .filter-select, .filter-input { padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; }
+        .filter-select, .filter-input { padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; transition: border-color 0.3s; }
+        .filter-select:focus, .filter-input:focus { outline: none; border-color: #667eea; }
         .filter-actions { display: flex; gap: 10px; }
         
-        .info-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .session-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
-        .info-item { display: flex; flex-direction: column; }
-        .info-label { color: #7f8c8d; font-size: 13px; margin-bottom: 5px; }
-        .info-value { color: #2c3e50; font-weight: 600; }
-        
         .section-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .section-card h2 { font-size: 20px; color: #2c3e50; margin-bottom: 20px; }
         .table-responsive { overflow-x: auto; }
         .data-table { width: 100%; border-collapse: collapse; }
-        .data-table th { background: #f8f9fa; padding: 12px; text-align: left; font-weight: 600; color: #2c3e50; border-bottom: 2px solid #e0e0e0; font-size: 13px; }
-        .data-table td { padding: 12px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+        .data-table th { background: #f8f9fa; padding: 12px; text-align: left; font-weight: 600; color: #2c3e50; border-bottom: 2px solid #e0e0e0; font-size: 14px; }
+        .data-table td { padding: 15px 12px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
         .data-table tbody tr:hover { background: #f8f9fa; }
         .text-muted { color: #999; font-size: 12px; }
         
@@ -115,323 +280,23 @@ $pageTitle = 'Attendance Records';
         .badge-warning { background: #fff3cd; color: #856404; }
         .badge-danger { background: #f8d7da; color: #721c24; }
         .badge-info { background: #d1ecf1; color: #0c5460; }
-        .badge-secondary { background: #e2e3e5; color: #383d41; }
         
-        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        .remarks { font-style: italic; color: #666; }
+        .table-footer { margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0; text-align: center; color: #7f8c8d; font-size: 14px; }
+        .empty-state { text-align: center; padding: 40px 20px; color: #7f8c8d; }
+        
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 14px; font-weight: 600; transition: transform 0.2s; }
         .btn:hover { transform: translateY(-2px); }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
         .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5568d3; }
         .btn-secondary { background: #6c757d; color: white; }
-        .btn-success { background: #28a745; color: white; }
-        
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
-        .modal-content { background: white; margin: 10% auto; padding: 0; width: 90%; max-width: 500px; border-radius: 12px; }
-        .modal-header { display: flex; justify-content: space-between; padding: 20px 25px; border-bottom: 1px solid #e0e0e0; }
-        .close { font-size: 28px; font-weight: bold; color: #999; cursor: pointer; }
-        .modal-body { padding: 25px; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; font-weight: 600; color: #2c3e50; margin-bottom: 8px; }
-        .form-control { width: 100%; padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; }
-        .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-secondary:hover { background: #5a6268; }
         
         @media (max-width: 768px) {
             .main-content { margin-left: 0; padding: 20px; }
             .filter-form { grid-template-columns: 1fr; }
+            .summary-cards { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
-</head>
-<body>
-    <?php include 'includes/secretary_sidebar.php'; ?>
-    
-    <div class="dashboard-container">
-        <main class="main-content">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $messageType; ?>"><?php echo htmlspecialchars($message); ?></div>
-            <?php endif; ?>
-            
-            <?php if (!$selectedSessionId): ?>
-                <div class="page-header">
-                    <div>
-                        <h1>✓ Attendance Records</h1>
-                        <p>View and manage attendance for all classes</p>
-                    </div>
-                </div>
-                
-                <div class="filter-section">
-                    <form method="GET" action="" class="filter-form">
-                        <div class="filter-group">
-                            <label for="class_id">Select Class:</label>
-                            <select name="class_id" id="class_id" class="filter-select" required>
-                                <option value="">Choose a class...</option>
-                                <?php foreach ($classes as $class): ?>
-                                    <option value="<?php echo $class['class_id']; ?>" <?php echo $filterClassId == $class['class_id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($class['course_code'] . ' - ' . $class['section'] . ' (' . $class['professor_name'] . ')'); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        
-                        <div class="filter-group">
-                            <label for="date">Filter by Date (Optional):</label>
-                            <input type="date" name="date" id="date" class="filter-input" value="<?php echo htmlspecialchars($filterDate); ?>">
-                        </div>
-                        
-                        <div class="filter-actions">
-                            <button type="submit" class="btn btn-primary">View Sessions</button>
-                            <a href="secretary_attendance.php" class="btn btn-secondary">Clear</a>
-                        </div>
-                    </form>
-                </div>
-                
-                <?php if ($filterClassId): ?>
-                    <div class="section-card">
-                        <h2>Attendance Sessions</h2>
-                        
-                        <?php if (empty($sessions)): ?>
-                            <div style="text-align: center; padding: 40px; color: #7f8c8d;">
-                                <p>No attendance sessions found for the selected filters.</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="table-responsive">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Time</th>
-                                            <th>Class</th>
-                                            <th>Professor</th>
-                                            <th>Status</th>
-                                            <th>Recorded</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($sessions as $session): ?>
-                                            <tr>
-                                                <td>
-                                                    <strong><?php echo date('M d, Y', strtotime($session['session_date'])); ?></strong><br>
-                                                    <small class="text-muted"><?php echo date('l', strtotime($session['session_date'])); ?></small>
-                                                </td>
-                                                <td>
-                                                    <?php echo date('g:i A', strtotime($session['start_time'])); ?> - 
-                                                    <?php echo date('g:i A', strtotime($session['end_time'])); ?>
-                                                </td>
-                                                <td>
-                                                    <strong><?php echo htmlspecialchars($session['course_code']); ?></strong><br>
-                                                    <small class="text-muted"><?php echo htmlspecialchars($session['section']); ?></small>
-                                                </td>
-                                                <td><?php echo htmlspecialchars($session['professor_name']); ?></td>
-                                                <td>
-                                                    <?php
-                                                    $statusClass = [
-                                                        'scheduled' => 'badge-info',
-                                                        'open' => 'badge-success',
-                                                        'closed' => 'badge-secondary',
-                                                        'cancelled' => 'badge-danger'
-                                                    ][$session['status']] ?? 'badge-secondary';
-                                                    ?>
-                                                    <span class="badge <?php echo $statusClass; ?>">
-                                                        <?php echo ucfirst($session['status']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <strong><?php echo $session['recorded_count']; ?></strong> / <?php echo $session['total_students']; ?>
-                                                    <?php if ($session['total_students'] > 0): ?>
-                                                        <small class="text-muted">
-                                                            (<?php echo round(($session['recorded_count'] / $session['total_students']) * 100); ?>%)
-                                                        </small>
-                                                    <?php endif; ?>
-                                                </td>
-                                                <td>
-                                                    <a href="secretary_attendance.php?session_id=<?php echo $session['session_id']; ?>" class="btn btn-sm btn-primary">
-                                                        View Details
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                <?php endif; ?>
-                
-            <?php else: ?>
-                <?php if ($sessionDetails): ?>
-                    <div class="page-header">
-                        <div>
-                            <h1>Session Details</h1>
-                            <p><?php echo htmlspecialchars($sessionDetails['course_code']); ?> - <?php echo htmlspecialchars($sessionDetails['section']); ?></p>
-                        </div>
-                        <a href="secretary_attendance.php?class_id=<?php echo $sessionDetails['class_id']; ?>" class="btn btn-secondary">
-                            ← Back to Sessions
-                        </a>
-                    </div>
-                    
-                    <div class="info-card">
-                        <div class="session-info-grid">
-                            <div class="info-item">
-                                <span class="info-label">Date:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($sessionDetails['formatted_date']); ?></span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">Time:</span>
-                                <span class="info-value">
-                                    <?php echo htmlspecialchars($sessionDetails['formatted_start']); ?> - 
-                                    <?php echo htmlspecialchars($sessionDetails['formatted_end']); ?>
-                                </span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">Professor:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($sessionDetails['professor_name']); ?></span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">Status:</span>
-                                <span class="info-value">
-                                    <?php
-                                    $statusClass = [
-                                        'scheduled' => 'badge-info',
-                                        'open' => 'badge-success',
-                                        'closed' => 'badge-secondary',
-                                        'cancelled' => 'badge-danger'
-                                    ][$sessionDetails['status']] ?? 'badge-secondary';
-                                    ?>
-                                    <span class="badge <?php echo $statusClass; ?>">
-                                        <?php echo ucfirst($sessionDetails['status']); ?>
-                                    </span>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="section-card">
-                        <h2>Attendance Records</h2>
-                        
-                        <?php if (empty($sessionAttendance)): ?>
-                            <div style="text-align: center; padding: 40px; color: #7f8c8d;">
-                                <p>No attendance records yet.</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="table-responsive">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Student Number</th>
-                                            <th>Name</th>
-                                            <th>Time In</th>
-                                            <th>Status</th>
-                                            <th>Remarks</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($sessionAttendance as $record): ?>
-                                            <tr>
-                                                <td><strong><?php echo htmlspecialchars($record['student_number']); ?></strong></td>
-                                                <td><?php echo htmlspecialchars($record['student_name']); ?></td>
-                                                <td>
-                                                    <?php if ($record['time_in']): ?>
-                                                        <?php echo htmlspecialchars($record['formatted_time']); ?>
-                                                    <?php else: ?>
-                                                        <span class="text-muted">—</span>
-                                                    <?php endif; ?>
-                                                </td>
-                                                <td>
-                                                    <?php
-                                                    $statusClass = [
-                                                        'present' => 'badge-success',
-                                                        'late' => 'badge-warning',
-                                                        'absent' => 'badge-danger',
-                                                        'excused' => 'badge-info'
-                                                    ][$record['status']] ?? 'badge-secondary';
-                                                    ?>
-                                                    <span class="badge <?php echo $statusClass; ?>">
-                                                        <?php echo ucfirst($record['status']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <?php if ($record['remarks']): ?>
-                                                        <?php echo htmlspecialchars($record['remarks']); ?>
-                                                    <?php else: ?>
-                                                        <span class="text-muted">—</span>
-                                                    <?php endif; ?>
-                                                </td>
-                                                <td>
-                                                    <button onclick="editAttendance(<?php echo $record['attendance_id']; ?>, '<?php echo $record['status']; ?>', '<?php echo htmlspecialchars($record['remarks'] ?? '', ENT_QUOTES); ?>')" 
-                                                            class="btn btn-sm btn-primary">
-                                                        Edit
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="alert alert-error">
-                        Session not found.
-                    </div>
-                <?php endif; ?>
-            <?php endif; ?>
-        </main>
-    </div>
-    
-    <!-- Edit Attendance Modal -->
-    <div id="editModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Edit Attendance</h3>
-                <span class="close" onclick="closeModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <form method="POST" action="">
-                    <input type="hidden" name="attendance_id" id="edit_attendance_id">
-                    <input type="hidden" name="edit_attendance" value="1">
-                    
-                    <div class="form-group">
-                        <label for="edit_status">Status:</label>
-                        <select name="status" id="edit_status" class="form-control" required>
-                            <option value="present">Present</option>
-                            <option value="late">Late</option>
-                            <option value="absent">Absent</option>
-                            <option value="excused">Excused</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="edit_remarks">Remarks (Optional):</label>
-                        <textarea name="remarks" id="edit_remarks" rows="3" class="form-control"></textarea>
-                    </div>
-                    
-                    <div class="modal-actions">
-                        <button type="submit" class="btn btn-primary">Save Changes</button>
-                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        function editAttendance(attendanceId, status, remarks) {
-            document.getElementById('edit_attendance_id').value = attendanceId;
-            document.getElementById('edit_status').value = status;
-            document.getElementById('edit_remarks').value = remarks;
-            document.getElementById('editModal').style.display = 'block';
-        }
-        
-        function closeModal() {
-            document.getElementById('editModal').style.display = 'none';
-        }
-        
-        window.onclick = function(event) {
-            const modal = document.getElementById('editModal');
-            if (event.target == modal) {
-                closeModal();
-            }
-        }
-    </script>
 </body>
 </html>
